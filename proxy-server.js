@@ -10,6 +10,7 @@ class TelnetProxy {
         this.wss = null;
         this.clients = new Map();
         this.telnetConnections = new Map();
+        this.clientTargets = new Map(); // Store target host/port for each client
         this.config = config;
     }
 
@@ -27,40 +28,11 @@ class TelnetProxy {
         this.wss = new WebSocket.Server({ server });
 
         this.wss.on('connection', (ws, req) => {
-            // Wait for setTarget message before connecting to telnet
-            let clientId = this.generateClientId();
+            const clientId = this.generateClientId();
             console.log(`New WebSocket connection: ${clientId}`);
             this.clients.set(clientId, ws);
-            let telnetConn = null;
-            let targetSet = false;
-            let targetHost = null;
-            let targetPort = null;
 
             ws.on('message', (data) => {
-                // If not set, expect a JSON message with type 'setTarget'
-                if (!targetSet) {
-                    try {
-                        const msg = JSON.parse(data.toString());
-                        if (msg.type === 'setTarget' && msg.host && msg.port) {
-                            targetHost = msg.host;
-                            targetPort = parseInt(msg.port, 10);
-                            targetSet = true;
-                            telnetConn = this.createTelnetConnection(clientId, targetHost, targetPort);
-                            if (!telnetConn) {
-                                ws.send('Failed to connect to telnet server\n');
-                                ws.close();
-                            }
-                        } else {
-                            ws.send('Expected setTarget message with host and port.');
-                            ws.close();
-                        }
-                    } catch (e) {
-                        ws.send('Invalid initial message.');
-                        ws.close();
-                    }
-                    return;
-                }
-                // Relay all other messages to telnet
                 this.handleWebSocketMessage(clientId, data);
             });
 
@@ -155,11 +127,36 @@ class TelnetProxy {
         const message = data.toString().trim();
         console.log(`Message from ${clientId}: ${message}`);
 
+        // Try to parse as JSON for special commands
+        try {
+            const parsedMessage = JSON.parse(message);
+            if (parsedMessage.type === 'setTarget') {
+                // Store the target host/port for this client
+                this.clientTargets.set(clientId, {
+                    host: parsedMessage.host,
+                    port: parsedMessage.port
+                });
+                console.log(`Set target for ${clientId}: ${parsedMessage.host}:${parsedMessage.port}`);
+                return;
+            }
+        } catch (e) {
+            // Not JSON, treat as regular telnet command
+        }
+
         // Get or create telnet connection
         let telnetConn = this.telnetConnections.get(clientId);
         
         if (!telnetConn) {
-            telnetConn = this.createTelnetConnection(clientId);
+            const target = this.clientTargets.get(clientId);
+            if (!target) {
+                console.error(`No target set for client ${clientId}`);
+                const ws = this.clients.get(clientId);
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send('Error: No server target set. Please connect first.\n');
+                }
+                return;
+            }
+            telnetConn = this.createTelnetConnection(clientId, target.host, target.port);
             if (!telnetConn) return;
         }
 
@@ -217,7 +214,9 @@ class TelnetProxy {
             this.telnetConnections.delete(clientId);
         }
         
+        // Clean up client data
         this.clients.delete(clientId);
+        this.clientTargets.delete(clientId);
     }
 
     generateClientId() {
