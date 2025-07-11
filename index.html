@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Naken Chat Client</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+      body, .container, .chat-messages, .message, .content {
+        font-family: 'Segoe UI', 'Roboto', 'Arial', 'Helvetica Neue', 'sans-serif';
+      }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Naken Chat Client</h1>
+            <div class="header-connection">
+                <div class="connection-fields">
+                    <label for="serverInput">Server/Hostname:</label>
+                    <input type="text" id="serverInput" placeholder="localhost" value="localhost">
+                    <label for="portInput">Port:</label>
+                    <input type="number" id="portInput" placeholder="6666" value="6666">
+                    <label for="usernameInput">Username:</label>
+                    <input type="text" id="usernameInput" placeholder="Enter your username">
+                    <button id="connectBtn" class="btn btn-primary">Connect</button>
+                    <button id="disconnectBtn" class="btn btn-secondary" disabled>Disconnect</button>
+                </div>
+                <div class="connection-status" id="connectionStatus">Disconnected</div>
+            </div>
+        </div>
+
+        <div class="main-area">
+            <div class="chat-tabs" id="chatTabs">
+                <div class="chat-tab active" data-tab="main">Main Chat <span class="tab-download" title="Download chat history" style="display:inline-block;vertical-align:middle;cursor:pointer;">&#128190;</span></div>
+                <!-- Private chat tabs will be added here -->
+            </div>
+            <div class="chat-container">
+                <div class="chat-messages" id="chatMessages">
+                    <div class="welcome-message">
+                        Welcome to Naken Chat Client! Enter your connection details above to get started.
+                    </div>
+                </div>
+                <div class="sidebar" id="sidebar">
+                    <div class="sidebar-header">
+                        <h3>Users Online</h3>
+                        <button id="refreshUsersBtn" class="btn btn-small">Refresh</button>
+                    </div>
+                    <div class="users-list" id="usersList">
+                        <div class="no-users">No users online</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-input-container">
+            <div class="input-wrapper">
+                <input type="text" id="messageInput" placeholder="Type your message or command..." disabled>
+                <button id="sendBtn" class="btn btn-primary" disabled>Send</button>
+            </div>
+            <div class="command-help">
+                <span class="help-text">Commands start with . (e.g., .help, .n username)</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html> 
