@@ -217,20 +217,20 @@ body {
 }
 
 .chat-tab {
-    padding: 14px 12px;
-    font-size: 1.05rem;
-    color: #b0c4de;
-    background: none;
-    border: none;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
-    cursor: pointer;
-    text-align: left;
-    transition: background 0.2s, color 0.2s;
-    outline: none;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 100px;
+  max-width: 260px;
+  width: auto;
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;      /* Increased vertical and horizontal padding */
+  cursor: pointer;
+  font-size: 1.08rem;      /* Slightly larger font */
+  gap: 8px;                /* Space between text and icons */
+  height: 40px;            /* Set a minimum height */
+  box-sizing: border-box;  /* Ensure padding is included in width/height */
 }
 
 .tab-download {
@@ -268,6 +268,26 @@ body {
     font-weight: 600;
 }
 
+/* Private tab styling */
+.chat-tab[data-tab^="pm_"] {
+    border-left: 3px solid #ff9800;
+    background: rgba(255, 152, 0, 0.1);
+}
+
+.chat-tab[data-tab^="pm_"]:hover {
+    background: rgba(255, 152, 0, 0.2);
+}
+
+.chat-tab[data-tab^="pm_"].active {
+    background: linear-gradient(90deg, #ff9800 0%, #283593 100%);
+    color: #fff;
+    font-weight: 600;
+}
+
+.chat-tab[data-tab="main"]:not(.active) {
+  border-left: 4px solid #64b5f6; /* Blue left border for main chat when unselected */
+}
+
 .chat-tab.flashing {
     animation: tabFlash 0.7s linear infinite alternate;
 }
@@ -275,6 +295,16 @@ body {
 @keyframes tabFlash {
     0% { background: #283593; color: #fff; }
     100% { background: #23272f; color: #64b5f6; }
+}
+
+/* Private tab flash animation */
+.chat-tab[data-tab^="pm_"].flashing {
+    animation: privateTabFlash 0.7s linear infinite alternate;
+}
+
+@keyframes privateTabFlash {
+    0% { background: #ff9800; color: #fff; }
+    100% { background: rgba(255, 152, 0, 0.3); color: #fff; }
 }
 
 .chat-container {
@@ -357,6 +387,17 @@ body {
 .message.user {
     background: rgba(100, 181, 246, 0.1);
     border-left-color: #64b5f6;
+}
+
+/* Private message styling */
+.message.private {
+    background: rgba(255, 152, 0, 0.1);
+    border-left-color: #ff9800;
+}
+
+.message.private .username {
+    background: #ff9800;
+    color: #fff;
 }
 
 .message .timestamp {
@@ -602,6 +643,53 @@ body {
     color: #23272f;
     font-weight: 700;
     box-shadow: 0 1px 6px rgba(67,233,123,0.10);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.users-list,
+#usersList {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.toast-container {
+  position: fixed;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+.toast {
+  min-width: 220px;
+  max-width: 400px;
+  background: #e53935;
+  color: #fff;
+  padding: 14px 28px;
+  border-radius: 8px;
+  margin-top: 10px;
+  font-size: 1rem;
+  font-weight: 500;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+  opacity: 0;
+  animation: toast-fadein 0.3s forwards, toast-fadeout 0.5s 2.5s forwards;
+  pointer-events: auto;
+}
+@keyframes toast-fadein {
+  from { opacity: 0; transform: translateY(30px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toast-fadeout {
+  to { opacity: 0; transform: translateY(30px) scale(0.98); }
 }
 
 @media (max-width: 768px) {

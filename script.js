@@ -1,3 +1,8 @@
+// At the top of the file, add a helper for debug logging
+function debugLog(...args) {
+    if (window.NAKENCHAT_DEBUG) console.log(...args);
+}
+
 class NakenChatClient {
     constructor() {
         this.socket = null;
@@ -46,6 +51,7 @@ class NakenChatClient {
         this.tabUsers = {}; // { tabId: { number, username } }
         this.loadChatHistories();
         this.lastPrivateSent = null; // Track last private message sent
+        this.lastPrivateSentTimeout = null; // Track timeout for last private sent message
     }
     
     initializeElements() {
@@ -135,88 +141,95 @@ class NakenChatClient {
         }
     }
     
+    showToast(message, type = 'error') {
+        const container = document.getElementById('toastContainer');
+        if (!container) return;
+        const toast = document.createElement('div');
+        toast.className = 'toast' + (type ? ' ' + type : '');
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            setTimeout(() => container.removeChild(toast), 500);
+        }, 2500);
+    }
+
     async connect() {
         const server = this.elements.serverInput.value.trim();
         const port = parseInt(this.elements.portInput.value);
         const username = this.elements.usernameInput.value.trim();
-        
         if (!server || !port || !username) {
             this.addMessage('Please fill in all connection details.', 'error');
+            this.showToast('Please fill in all connection details.', 'error');
             return;
         }
-        
         if (port < 1 || port > 65535) {
             this.addMessage('Port must be between 1 and 65535.', 'error');
+            this.showToast('Port must be between 1 and 65535.', 'error');
             return;
         }
-        
         this.server = server;
         this.port = port;
         this.username = username;
-        
         try {
             this.updateConnectionStatus('Connecting...', 'connecting');
             this.elements.connectBtn.disabled = true;
-            
-            // Force clear all chat histories and tabUsers from localStorage on new connect
             localStorage.removeItem('nakenChatHistories');
             this.chatHistories = { main: [] };
             this.tabUsers = {};
             this.saveChatHistories();
-            // Clear private tabs and histories on new connect
             this.clearPrivateTabsAndHistories();
-
-            // Create WebSocket connection to the local proxy server
             const wsUrl = `ws://localhost:7666`;
             this.socket = new WebSocket(wsUrl);
-            
             this.socket.onopen = () => {
-                // Send setTarget message with desired telnet host/port
                 this.socket.send(JSON.stringify({
                     type: 'setTarget',
                     host: server,
                     port: port
                 }));
-
                 this.isConnected = true;
                 this.updateConnectionStatus('Connected', 'connected');
                 this.elements.connectBtn.disabled = true;
                 this.elements.disconnectBtn.disabled = false;
                 this.elements.messageInput.disabled = false;
                 this.elements.sendBtn.disabled = false;
-                
                 this.addMessage(`Connected to ${server}:${port}`, 'success');
-                
-                // Send username command
                 this.sendCommand(`.n ${username}`);
-                
-                // Get user list after a short delay
                 setTimeout(() => {
                     this.sendCommand('.w');
                 }, 1000);
             };
-            
             this.socket.onmessage = (event) => {
                 // Split incoming data by newlines and process each line
                 const lines = event.data.split('\n');
                 for (const line of lines) {
-                    if (line.trim() !== '') {
-                        this.handleMessage(line);
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+                    // Try to parse as JSON error
+                    try {
+                        const data = JSON.parse(trimmed);
+                        if (data.type === 'error' && data.message) {
+                            this.showToast(data.message, 'error');
+                            this.handleDisconnect();
+                            return;
+                        }
+                    } catch (e) {
+                        // Not JSON, continue as normal
                     }
+                    this.handleMessage(trimmed);
                 }
             };
-            
             this.socket.onclose = () => {
                 this.handleDisconnect();
             };
-            
             this.socket.onerror = (error) => {
                 this.addMessage(`Connection error: ${error.message}`, 'error');
+                this.showToast('Could not connect to server. Please check the address and try again.', 'error');
                 this.handleDisconnect();
             };
-            
         } catch (error) {
             this.addMessage(`Failed to connect: ${error.message}`, 'error');
+            this.showToast('Could not connect to server. Please check the address and try again.', 'error');
             this.handleDisconnect();
         }
         this.hasShownWelcome = false;
@@ -256,21 +269,58 @@ class NakenChatClient {
         if (this.activeTab.startsWith('pm_') && !message.startsWith('.')) {
             const tabUser = this.tabUsers[this.activeTab];
             if (tabUser && tabUser.number) {
-                this.lastPrivateSent = { number: tabUser.number, username: tabUser.username, message };
+                debugLog('📤 Sending private message from tab:', this.activeTab, 'to user:', tabUser);
+                this.setLastPrivateSent(tabUser.number, tabUser.username, message);
                 this.sendCommand(`.p ${tabUser.number} ${message}`);
                 return;
             }
         }
 
         if (message.startsWith('.')) {
+            // Check if this is a .p command and set lastPrivateSent accordingly
+            const pMatch = message.match(/^\.p\s+(\d+)\s+([\s\S]+)/);
+            if (pMatch) {
+                const number = pMatch[1];
+                const msg = pMatch[2];
+                // Try to get username from tabUsers or users list
+                let username = '';
+                if (this.tabUsers[`pm_${number}`]) {
+                    username = this.tabUsers[`pm_${number}`].username;
+                } else if (this.users.has(number)) {
+                    username = this.users.get(number).username;
+                }
+                this.setLastPrivateSent(number, username, msg);
+            }
+            debugLog('📤 Sending command:', message);
             this.sendCommand(message);
         } else {
+            debugLog('📤 Sending regular message:', message);
             this.sendToServer(message);
         }
+    }
+
+    setLastPrivateSent(number, username, message) {
+        this.lastPrivateSent = { number, username, message };
+        if (this.lastPrivateSentTimeout) clearTimeout(this.lastPrivateSentTimeout);
+        this.lastPrivateSentTimeout = setTimeout(() => {
+            debugLog('Clearing lastPrivateSent due to timeout');
+            this.lastPrivateSent = null;
+        }, 10000); // 10 seconds
     }
     
     sendCommand(command) {
         if (!this.isConnected) return;
+        
+        debugLog('📤 Sending command to server:', command);
+        
+        // Special debugging for private messages
+        if (command.startsWith('.p ')) {
+            debugLog('📤 PRIVATE MESSAGE COMMAND DETECTED:', command);
+            const parts = command.split(' ');
+            if (parts.length >= 3) {
+                debugLog('📤 Private message details - Number:', parts[1], 'Message:', parts.slice(2).join(' '));
+            }
+        }
         
         this.sendToServer(command);
         
@@ -301,7 +351,7 @@ class NakenChatClient {
     
     handleMessage(data) {
         // Debug: log every incoming message
-        console.log('handleMessage received:', data);
+        debugLog('handleMessage received:', data);
         // Split incoming data by newlines and process each line
         const lines = data.toString().split('\n');
         let suppressing = !this.hasShownWelcome;
@@ -310,7 +360,18 @@ class NakenChatClient {
             const message = lines[i];
             const cleanMsg = message.replace(/\0/g, '').trim();
             if (!cleanMsg) continue;
-            console.log('RECEIVED:', cleanMsg);
+            debugLog('RECEIVED:', cleanMsg);
+            
+            // Enhanced debugging for private message detection
+            if (cleanMsg.includes('private') || cleanMsg.includes('Message sent to') || 
+                (cleanMsg.includes('>>') && cleanMsg.includes('[') && cleanMsg.includes(']')) ||
+                cleanMsg.includes('>>')) {
+                debugLog('🔍 POTENTIAL PRIVATE MESSAGE DETECTED:', cleanMsg);
+                debugLog('🔍 Message contains "private":', cleanMsg.includes('private'));
+                debugLog('🔍 Message contains "Message sent to":', cleanMsg.includes('Message sent to'));
+                debugLog('🔍 Message contains ">>":', cleanMsg.includes('>>'));
+                debugLog('🔍 Message contains "[" and "]":', cleanMsg.includes('[') && cleanMsg.includes(']'));
+            }
 
             // --- SUPPRESS SERVER .HELP OUTPUT LOGIC ---
             if (cleanMsg === 'List of commands:') {
@@ -356,7 +417,7 @@ class NakenChatClient {
                 if (cleanMsg.startsWith('Total:')) {
                     this.userBuffer.push(cleanMsg.replace(/\r/g, ''));
                     // Debug: log before parsing user list
-                    console.log('Calling parseAndShowUserList with:', this.userBuffer);
+                    debugLog('Calling parseAndShowUserList with:', this.userBuffer);
                     this.parseAndShowUserList(this.userBuffer);
                     this.userBuffer = [];
                     this.collectingUsers = false;
@@ -378,45 +439,324 @@ class NakenChatClient {
                 continue;
             }
 
-            // --- NEW: Detect private message patterns and pass special type ---
-            const privOutMatch = cleanMsg.match(/^>> Message sent to \[(\d+)\](.*?): <\d+>(.+?) \(private\): (.+)$/);
-            const privInMatch = cleanMsg.match(/^<(\d+)>(.*?) \(private\): (.+)$/);
-            // Patch: Support for short confirmation (no echo)
-            const privSentShort = cleanMsg.match(/^>> Message sent to \[(\d+)\](.*)\.$/);
-            if (privOutMatch || privInMatch) {
-                this.addMessage(cleanMsg, 'private');
-                return;
-            } else if (privSentShort && this.lastPrivateSent && privSentShort[1] === String(this.lastPrivateSent.number)) {
-                // Create or activate the private tab
-                const tabId = `pm_${this.lastPrivateSent.number}`;
-                if (!this.chatHistories[tabId]) {
-                    this.chatHistories[tabId] = [];
-                    this.tabUsers[tabId] = { number: this.lastPrivateSent.number, username: this.lastPrivateSent.username };
-                    this.createPrivateTab(tabId, this.lastPrivateSent.number, this.lastPrivateSent.username);
-                    this.switchTab(tabId);
-                }
-                // Add your own message to the tab
-                this.chatHistories[tabId].push({ content: `<span class='username'>You</span> (you): ${this.lastPrivateSent.message}`, type: 'user' });
-                this.saveChatHistories();
-                if (tabId === this.activeTab) {
-                    const messageDiv = document.createElement('div');
-                    messageDiv.className = `message user`;
-                    const timestamp = new Date().toLocaleTimeString();
-                    const processedContent = this.processMessageContent(`<span class='username'>You</span> (you): ${this.lastPrivateSent.message}`);
-                    messageDiv.innerHTML = `
-                        <span class="timestamp">[${timestamp}]</span>
-                        <span class="content">${processedContent}</span>
-                    `;
-                    this.elements.chatMessages.appendChild(messageDiv);
-                    this.scrollToBottom();
-                }
-                this.lastPrivateSent = null;
+            // --- IMPROVED PRIVATE MESSAGE DETECTION ---
+            // Handle private messages with better pattern matching for different server versions
+            const privateMessageResult = this.handlePrivateMessage(cleanMsg);
+            if (privateMessageResult.handled) {
+                debugLog('Private message handled, skipping further processing');
+                continue; // Message was handled as private, don't process further
+            }
+
+            // Only add to main chat if not a private message
+            debugLog('Adding message to main chat:', cleanMsg);
+            this.addMessage(cleanMsg, 'user');
+        }
+    }
+
+    // New method to handle private message detection and routing
+    handlePrivateMessage(cleanMsg) {
+        debugLog(`Checking for private message patterns in: "${cleanMsg}"`);
+        
+        // Enhanced debugging - log all messages that might be private
+        if (cleanMsg.includes('private') || cleanMsg.includes('Message sent to') || 
+            (cleanMsg.includes('>>') && cleanMsg.includes('[') && cleanMsg.includes(']'))) {
+            debugLog('POTENTIAL PRIVATE MESSAGE DETECTED:', cleanMsg);
+        }
+        
+        // Pattern 1: Outgoing private message with full echo
+        // >> Message sent to [1]bob: <0>Derrick (private): hi
+        const privOutMatch = cleanMsg.match(/^>> Message sent to \[(\d+)\](.*?): <\d+>(.+?) \(private\): (.+)$/);
+        
+        // Pattern 2: Incoming private message
+        // <1>bob (private): hello
+        const privInMatch = cleanMsg.match(/^<(\d+)>(.*?) \(private\): (.+)$/);
+        
+        // Pattern 3: Short confirmation for outgoing message (no echo)
+        // >> Message sent to [1]bob.
+        const privSentShort = cleanMsg.match(/^>> Message sent to \[(\d+)\](.*)\.$/);
+        
+        // Pattern 4: Alternative incoming format (some server versions)
+        // <1>bob: hello (private)
+        const privInAltMatch = cleanMsg.match(/^<(\d+)>(.*?): (.+?) \(private\)$/);
+        
+        // Pattern 5: Another alternative format
+        // [1]bob (private): hello
+        const privInAlt2Match = cleanMsg.match(/^\[(\d+)\](.*?) \(private\): (.+)$/);
+        
+        // Pattern 6: Online server format - outgoing with different structure
+        // >> Message sent to [1]username: message
+        const privOutOnlineMatch = cleanMsg.match(/^>> Message sent to \[(\d+)\](.*?): (.+)$/);
+        
+        // Pattern 7: Online server format - incoming with different structure
+        // >> [1]username: message (private)
+        const privInOnlineMatch = cleanMsg.match(/^>> \[(\d+)\](.*?): (.+?) \(private\)$/);
+        
+        // Pattern 8: Another online server format
+        // >> [1]username (private): message
+        const privInOnline2Match = cleanMsg.match(/^>> \[(\d+)\](.*?) \(private\): (.+)$/);
+        
+        // Pattern 9: Simple confirmation format (with optional period)
+        // >> Message sent to [1]username or >> Message sent to [1]username.
+        const privSentSimple = cleanMsg.match(/^>> Message sent to \[(\d+)\](.*?)\.?$/);
+
+        if (privOutMatch) {
+            debugLog('Matched Pattern 1 (outgoing with echo):', privOutMatch);
+            // Outgoing private message with full echo
+            const number = privOutMatch[1];
+            const username = privOutMatch[2].trim();
+            const from = privOutMatch[3].trim();
+            const message = privOutMatch[4];
+            
+            this.handleOutgoingPrivateMessage(number, username, from, message);
+            return { handled: true };
+        } else if (privInMatch) {
+            debugLog('Matched Pattern 2 (incoming):', privInMatch);
+            // Incoming private message
+            const number = privInMatch[1];
+            const username = privInMatch[2];
+            const message = privInMatch[3];
+            
+            this.handleIncomingPrivateMessage(number, username, message);
+            return { handled: true };
+        } else if (privSentShort && this.lastPrivateSent && privSentShort[1] === String(this.lastPrivateSent.number)) {
+            debugLog('Matched Pattern 3 (short confirmation):', privSentShort);
+            // Short confirmation for outgoing message
+            this.handleOutgoingPrivateConfirmation();
+            return { handled: true };
+        } else if (privInAltMatch) {
+            debugLog('Matched Pattern 4 (alternative incoming):', privInAltMatch);
+            // Alternative incoming format
+            const number = privInAltMatch[1];
+            const username = privInAltMatch[2];
+            const message = privInAltMatch[3];
+            
+            this.handleIncomingPrivateMessage(number, username, message);
+            return { handled: true };
+        } else if (privInAlt2Match) {
+            debugLog('Matched Pattern 5 (alternative format 2):', privInAlt2Match);
+            // Another alternative incoming format
+            const number = privInAlt2Match[1];
+            const username = privInAlt2Match[2];
+            const message = privInAlt2Match[3];
+            
+            this.handleIncomingPrivateMessage(number, username, message);
+            return { handled: true };
+        } else if (privOutOnlineMatch && this.lastPrivateSent && privOutOnlineMatch[1] === String(this.lastPrivateSent.number)) {
+            debugLog('Matched Pattern 6 (online outgoing):', privOutOnlineMatch);
+            // Online server outgoing format
+            const number = privOutOnlineMatch[1];
+            const username = privOutOnlineMatch[2].trim();
+            const message = privOutOnlineMatch[3];
+            
+            this.handleOutgoingPrivateMessage(number, username, this.username, message);
+            return { handled: true };
+        } else if (privInOnlineMatch) {
+            debugLog('Matched Pattern 7 (online incoming):', privInOnlineMatch);
+            // Online server incoming format
+            const number = privInOnlineMatch[1];
+            const username = privInOnlineMatch[2];
+            const message = privInOnlineMatch[3];
+            
+            this.handleIncomingPrivateMessage(number, username, message);
+            return { handled: true };
+        } else if (privInOnline2Match) {
+            debugLog('Matched Pattern 8 (online incoming 2):', privInOnline2Match);
+            // Another online server incoming format
+            const number = privInOnline2Match[1];
+            const username = privInOnline2Match[2];
+            const message = privInOnline2Match[3];
+            
+            this.handleIncomingPrivateMessage(number, username, message);
+            return { handled: true };
+        } else if (privSentSimple) {
+            debugLog('Pattern 9 (simple confirmation) matched:', privSentSimple);
+            if (this.lastPrivateSent) {
+                debugLog('lastPrivateSent:', this.lastPrivateSent);
+                debugLog('privSentSimple[1] (number):', privSentSimple[1], 'lastPrivateSent.number:', this.lastPrivateSent.number);
+                debugLog('String match:', privSentSimple[1] === String(this.lastPrivateSent.number));
+            } else {
+                debugLog('lastPrivateSent is null or undefined');
+            }
+            if (this.lastPrivateSent && privSentSimple[1] === String(this.lastPrivateSent.number)) {
+                debugLog('Matched Pattern 9 (simple confirmation):', privSentSimple);
+                // Simple confirmation for outgoing message (with or without period)
+                this.handleOutgoingPrivateConfirmation();
+                return { handled: true };
+            }
+        }
+
+        debugLog('No private message patterns matched');
+        return { handled: false };
+    }
+
+    // Handle outgoing private message with full echo
+    handleOutgoingPrivateMessage(number, username, from, message) {
+        try {
+            const tabId = `pm_${number}`;
+            debugLog(`Handling outgoing private message to ${username} (#${number}): ${message}`);
+            
+            // Create tab if it doesn't exist
+            if (!this.chatHistories[tabId]) {
+                debugLog(`Creating new chat history for tab: ${tabId}`);
+                this.chatHistories[tabId] = [];
+                this.tabUsers[tabId] = { number, username };
+                this.createPrivateTab(tabId, number, username);
+            }
+            
+            // Switch to the tab if it was just created
+            const tabElement = this.elements.chatTabs.querySelector(`[data-tab="${tabId}"]`);
+            if (!tabElement) {
+                debugLog(`Tab element not found, switching to: ${tabId}`);
+                this.switchTab(tabId);
+            }
+            
+            // Flash tab if not active
+            if (this.activeTab !== tabId) {
+                debugLog(`Flashing tab: ${tabId} (active: ${this.activeTab})`);
+                this.flashTab(tabId);
+            }
+            
+            // Add message to tab history
+            const pillClass = from === this.username ? 'username username-primary' : 'username';
+            const messageContent = `<span class='${pillClass}'>${from}</span> (you): ${message}`;
+            this.chatHistories[tabId].push({ 
+                content: messageContent, 
+                type: 'user' 
+            });
+            this.saveChatHistories();
+            
+            // Display in active tab if it's the current tab
+            if (tabId === this.activeTab) {
+                debugLog(`Displaying message in active tab: ${tabId}`);
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message user';
+                const timestamp = new Date().toLocaleTimeString();
+                // Don't process content that's already been processed
+                const displayContent = messageContent.includes('<span class=') ? messageContent : this.processMessageContent(messageContent);
+                messageDiv.innerHTML = `
+                    <span class="timestamp">[${timestamp}]</span>
+                    <span class="content">${displayContent}</span>
+                `;
+                this.elements.chatMessages.appendChild(messageDiv);
+                this.scrollToBottom();
+            }
+        } catch (error) {
+            console.error('Error handling outgoing private message:', error);
+        }
+    }
+
+    // Handle incoming private message
+    handleIncomingPrivateMessage(number, username, message) {
+        try {
+            const tabId = `pm_${number}`;
+            debugLog(`Handling incoming private message from ${username} (#${number}): ${message}`);
+            
+            // Create tab if it doesn't exist
+            if (!this.chatHistories[tabId]) {
+                debugLog(`Creating new chat history for incoming message tab: ${tabId}`);
+                this.chatHistories[tabId] = [];
+                this.tabUsers[tabId] = { number, username };
+                this.createPrivateTab(tabId, number, username);
+            }
+            
+            // Switch to the tab if it was just created
+            const tabElement = this.elements.chatTabs.querySelector(`[data-tab="${tabId}"]`);
+            if (!tabElement) {
+                debugLog(`Tab element not found for incoming message, switching to: ${tabId}`);
+                this.switchTab(tabId);
+            }
+            
+            // Flash tab if not active
+            if (this.activeTab !== tabId) {
+                debugLog(`Flashing tab for incoming message: ${tabId} (active: ${this.activeTab})`);
+                this.flashTab(tabId);
+            }
+            
+            // Add message to tab history
+            const pillClass = username === this.username ? 'username username-primary' : 'username';
+            const messageContent = `<span class='${pillClass}'>${username}</span>: ${message}`;
+            this.chatHistories[tabId].push({ 
+                content: messageContent, 
+                type: 'user' 
+            });
+            this.saveChatHistories();
+            
+            // Display in active tab if it's the current tab
+            if (tabId === this.activeTab) {
+                debugLog(`Displaying incoming message in active tab: ${tabId}`);
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message user';
+                const timestamp = new Date().toLocaleTimeString();
+                // Don't process content that's already been processed
+                const displayContent = messageContent.includes('<span class=') ? messageContent : this.processMessageContent(messageContent);
+                messageDiv.innerHTML = `
+                    <span class="timestamp">[${timestamp}]</span>
+                    <span class="content">${displayContent}</span>
+                `;
+                this.elements.chatMessages.appendChild(messageDiv);
+                this.scrollToBottom();
+            }
+        } catch (error) {
+            console.error('Error handling incoming private message:', error);
+        }
+    }
+
+    // Handle outgoing private message confirmation (short format)
+    handleOutgoingPrivateConfirmation() {
+        try {
+            debugLog('handleOutgoingPrivateConfirmation called');
+            if (!this.lastPrivateSent) {
+                debugLog('No lastPrivateSent data available for confirmation');
                 return;
             }
-            // --- END NEW ---
-
-            // Always show all lines in the chat window
-            this.addMessage(cleanMsg, 'user');
+            if (this.lastPrivateSentTimeout) {
+                clearTimeout(this.lastPrivateSentTimeout);
+                this.lastPrivateSentTimeout = null;
+            }
+            debugLog('lastPrivateSent in confirmation handler:', this.lastPrivateSent);
+            const tabId = `pm_${this.lastPrivateSent.number}`;
+            debugLog(`Handling outgoing private confirmation for tab: ${tabId}`);
+            
+            // Create tab if it doesn't exist
+            if (!this.chatHistories[tabId]) {
+                debugLog(`Creating new chat history for confirmation tab: ${tabId}`);
+                this.chatHistories[tabId] = [];
+                this.tabUsers[tabId] = { 
+                    number: this.lastPrivateSent.number, 
+                    username: this.lastPrivateSent.username 
+                };
+                this.createPrivateTab(tabId, this.lastPrivateSent.number, this.lastPrivateSent.username);
+                this.switchTab(tabId);
+            }
+            
+            // Add your own message to the tab
+            const messageContent = `<span class='username'>You</span> (you): ${this.lastPrivateSent.message}`;
+            this.chatHistories[tabId].push({ 
+                content: messageContent, 
+                type: 'user' 
+            });
+            this.saveChatHistories();
+            
+            // Display in active tab if it's the current tab
+            if (tabId === this.activeTab) {
+                debugLog(`Displaying confirmation message in active tab: ${tabId}`);
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message user';
+                const timestamp = new Date().toLocaleTimeString();
+                // Don't process content that's already been processed
+                const displayContent = messageContent.includes('<span class=') ? messageContent : this.processMessageContent(messageContent);
+                messageDiv.innerHTML = `
+                    <span class="timestamp">[${timestamp}]</span>
+                    <span class="content">${displayContent}</span>
+                `;
+                this.elements.chatMessages.appendChild(messageDiv);
+                this.scrollToBottom();
+            }
+            
+            debugLog(`Clearing lastPrivateSent for: ${this.lastPrivateSent.username} (#${this.lastPrivateSent.number})`);
+            this.lastPrivateSent = null;
+        } catch (error) {
+            console.error('Error handling outgoing private confirmation:', error);
         }
     }
     
@@ -477,7 +817,7 @@ class NakenChatClient {
     }
 
     parseAndShowUserList(lines) {
-        console.log('User list lines received:', lines);
+        debugLog('User list lines received:', lines);
         // Find the header line index
         const headerIdx = lines.findIndex(line => line.trim().startsWith('Name'));
         if (headerIdx === -1) {
@@ -489,10 +829,10 @@ class NakenChatClient {
             const line = lines[i].trim();
             if (!line || line.startsWith('-') || line.startsWith('Total:')) continue;
             // Debug: log the line before parsing
-            console.log('Parsing user line:', line);
+            debugLog('Parsing user line:', line);
             // Robust regex for user line
             const match = line.match(/^\[(\d+)\](\S+)\s+([\-A-Za-z]+)\s+(\S+)\s+(?:(\d+[hm]?)\s+)?(.+)$/);
-            console.log('Regex match result:', match);
+            debugLog('Regex match result:', match);
             if (match) {
                 const [, number, username, status, channel, idle, location] = match;
                 parsedUsers.set(number, {
@@ -511,7 +851,7 @@ class NakenChatClient {
             for (const [number, userInfo] of parsedUsers.entries()) {
                 this.users.set(number, userInfo);
             }
-            console.log('USERS PARSED:', Array.from(this.users.entries()));
+            debugLog('USERS PARSED:', Array.from(this.users.entries()));
             this.updateUsersList();
         } else {
             console.warn('No users parsed from .w output, not clearing user list.');
@@ -533,13 +873,18 @@ class NakenChatClient {
                 });
             }
         }
-        console.log('USERS PARSED:', Array.from(this.users.entries()));
+        debugLog('USERS PARSED:', Array.from(this.users.entries()));
         this.updateUsersList();
     }
     
     processMessageContent(content) {
+        // If content already contains HTML spans, don't process it again
+        if (content.includes('<span class=')) {
+            debugLog('Content already contains HTML, skipping processing:', content.substring(0, 50) + '...');
+            return content;
+        }
         // If the message matches [number]username: message, only process the message part
-        const chatMsgMatch = content.match(/^\[(\d+)\](\S+):([\s\S]*)$/);
+        const chatMsgMatch = content.match(/^(\[\d+\])(\S+):([\s\S]*)$/);
         let prefix = '', msg = content;
         if (chatMsgMatch) {
             // Determine if this is the current user
@@ -554,20 +899,10 @@ class NakenChatClient {
             }
         }
         msg = msg.trim(); // Trim leading/trailing spaces
-        // Debug: log the message part being processed for emojis
-        console.log('Processing for emoji:', msg);
+        debugLog('Processing for emoji:', msg);
 
         // 1. Convert text emojis to Unicode emojis (before linkifying URLs)
-        const emojiMap = this.emojiMap || {
-            ':D': '😀', ':P': '😛', ':)': '🙂', ':(': '😞', ';)': '😉',
-            ':O': '😮', ':o': '😮', ':|': '😐', ':/': '😕', ':\\': '😕',
-            '8)': '😎', '8-)': '😎', 'B)': '😎', 'B-)': '😎',
-            '<3': '❤️', '</3': '💔', ':heart:': '❤️',
-            ':smile:': '😊', ':sad:': '😢', ':wink:': '😉',
-            ':lol:': '😂', ':rofl:': '🤣', ':cool:': '😎',
-            ':thumbsup:': '👍', ':thumbsdown:': '👎',
-            ':wave:': '👋', ':clap:': '👏', ':pray:': '🙏'
-        };
+        const emojiMap = this.emojiMap;
         // Sort emoji keys by length (longest first) to avoid partial matches
         const emojiKeys = Object.keys(emojiMap).sort((a, b) => b.length - a.length);
         // Build a global regex to match any emoji code
@@ -601,88 +936,16 @@ class NakenChatClient {
         if (typeof content === 'string' && content.includes('List of commands:')) {
             return;
         }
-        // Always check for private message patterns
-        let tabId = 'main';
-        // Outgoing private message: [1]Bob: (allow any username, non-greedy)
-        const privMatch = content.match(/^>> Message sent to \[(\d+)\](.*?): <\d+>(.+?) \(private\): (.+)$/);
-        // Incoming private message: <1>Bob (private): ... (allow any username, non-greedy)
-        const privInMatch = content.match(/^<(\d+)>(.*?) \(private\): (.+)$/);
-        if (privMatch) {
-            const number = privMatch[1];
-            const username = privMatch[2].trim();
-            const from = privMatch[3].trim(); // your username
-            const message = privMatch[4];
-            tabId = `pm_${number}`;
-            let created = false;
-            if (!this.chatHistories[tabId]) {
-                this.chatHistories[tabId] = [];
-                this.tabUsers[tabId] = { number, username };
-                this.createPrivateTab(tabId, number, username);
-                created = true;
-            }
-            if (created) {
-                this.switchTab(tabId);
-            }
-            if (this.activeTab !== tabId) {
-                this.flashTab(tabId);
-            }
-            // Show your own message in the private tab
-            const pillClass = from === this.username ? 'username username-primary' : 'username';
-            this.chatHistories[tabId].push({ content: `<span class='${pillClass}'>${from}</span> (you): ${message}`, type: 'user' });
-            this.saveChatHistories();
-            if (tabId === this.activeTab) {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = `message user`;
-                const timestamp = new Date().toLocaleTimeString();
-                const processedContent = this.processMessageContent(`<span class='${pillClass}'>${from}</span> (you): ${message}`);
-                messageDiv.innerHTML = `
-                    <span class="timestamp">[${timestamp}]</span>
-                    <span class="content">${processedContent}</span>
-                `;
-                this.elements.chatMessages.appendChild(messageDiv);
-                if (scroll !== false) this.scrollToBottom();
-            }
-            return;
-        } else if (privInMatch) {
-            const number = privInMatch[1];
-            const username = privInMatch[2];
-            const message = privInMatch[3];
-            tabId = `pm_${number}`;
-            let created = false;
-            if (!this.chatHistories[tabId]) {
-                this.chatHistories[tabId] = [];
-                this.tabUsers[tabId] = { number, username };
-                this.createPrivateTab(tabId, number, username);
-                created = true;
-            }
-            if (created) {
-                this.switchTab(tabId);
-            }
-            if (this.activeTab !== tabId) {
-                this.flashTab(tabId);
-            }
-            // Show incoming message in the private tab
-            const pillClass = username === this.username ? 'username username-primary' : 'username';
-            this.chatHistories[tabId].push({ content: `<span class='${pillClass}'>${username}</span>: ${message}`, type: 'user' });
-            this.saveChatHistories();
-            if (tabId === this.activeTab) {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = `message user`;
-                const timestamp = new Date().toLocaleTimeString();
-                const processedContent = this.processMessageContent(`<span class='${pillClass}'>${username}</span>: ${message}`);
-                messageDiv.innerHTML = `
-                    <span class="timestamp">[${timestamp}]</span>
-                    <span class="content">${processedContent}</span>
-                `;
-                this.elements.chatMessages.appendChild(messageDiv);
-                if (scroll !== false) this.scrollToBottom();
-            }
-            return;
-        }
-        // Fallback: Add to main tab
+        // Add to main tab (private messages are handled separately)
+        const tabId = 'main';
         if (!this.chatHistories[tabId]) this.chatHistories[tabId] = [];
         this.chatHistories[tabId].push({ content, type });
         this.saveChatHistories();
+        // Flash main chat tab if not active
+        if (tabId !== this.activeTab) {
+            const mainTab = this.elements.chatTabs.querySelector('[data-tab="main"]');
+            if (mainTab) mainTab.classList.add('flashing');
+        }
         // Only render if this is the active tab
         if (tabId === this.activeTab) {
             const messageDiv = document.createElement('div');
@@ -704,7 +967,7 @@ class NakenChatClient {
     }
     
     updateUsersList() {
-        console.log('UPDATE SIDEBAR:', Array.from(this.users.entries()));
+        debugLog('UPDATE SIDEBAR:', Array.from(this.users.entries()));
         const usersList = this.elements.usersList;
         usersList.innerHTML = '';
         
@@ -872,45 +1135,109 @@ class NakenChatClient {
     }
 
     switchTab(tabId) {
-        this.activeTab = tabId;
-        // Remove active/flashing from all tabs
-        Array.from(this.elements.chatTabs.children).forEach(tab => {
-            tab.classList.remove('active', 'flashing');
-        });
-        // Set active on the selected tab
-        const activeTabEl = this.elements.chatTabs.querySelector(`[data-tab="${tabId}"]`);
-        if (activeTabEl) activeTabEl.classList.add('active');
-        // Render chat history for this tab
-        this.renderChatHistory(tabId);
+        try {
+            debugLog(`Switching to tab: ${tabId} (current active: ${this.activeTab})`);
+            
+            // Don't switch if already on this tab
+            if (this.activeTab === tabId) {
+                debugLog(`Already on tab: ${tabId}, skipping switch`);
+                return;
+            }
+            
+            this.activeTab = tabId;
+            
+            // Remove active/flashing from all tabs
+            Array.from(this.elements.chatTabs.children).forEach(tab => {
+                tab.classList.remove('active', 'flashing');
+            });
+            
+            // Set active on the selected tab
+            const activeTabEl = this.elements.chatTabs.querySelector(`[data-tab="${tabId}"]`);
+            if (activeTabEl) {
+                activeTabEl.classList.add('active');
+                // Remove flashing if switching to main
+                if (tabId === 'main') activeTabEl.classList.remove('flashing');
+                debugLog(`Activated tab: ${tabId}`);
+            } else {
+                console.warn(`Tab element not found for: ${tabId}`);
+                // If tab doesn't exist, create it (for main tab)
+                if (tabId === 'main') {
+                    this.ensureMainTabExists();
+                }
+            }
+            
+            // Render chat history for this tab
+            this.renderChatHistory(tabId);
+        } catch (error) {
+            console.error('Error switching tab:', error);
+        }
+    }
+
+    // Ensure main tab exists
+    ensureMainTabExists() {
+        const mainTab = this.elements.chatTabs.querySelector('[data-tab="main"]');
+        if (!mainTab) {
+            debugLog('Creating main tab');
+            const newMainTab = document.createElement('div');
+            newMainTab.className = 'chat-tab active';
+            newMainTab.dataset.tab = 'main';
+            newMainTab.innerHTML = 'Main Chat <span class="tab-download" title="Download chat history" style="display:inline-block;vertical-align:middle;cursor:pointer;">&#128190;</span>';
+            this.elements.chatTabs.appendChild(newMainTab);
+        }
     }
 
     renderChatHistory(tabId) {
-        const messages = this.chatHistories[tabId] || [];
-        this.elements.chatMessages.innerHTML = '';
-        for (const { content, type } of messages) {
-            // Directly render message DOM, do not call addMessage
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${type}`;
-            const timestamp = new Date().toLocaleTimeString();
-            const processedContent = this.processMessageContent(content);
-            messageDiv.innerHTML = `
-                <span class="timestamp">[${timestamp}]</span>
-                <span class="content">${processedContent}</span>
-            `;
-            this.elements.chatMessages.appendChild(messageDiv);
+        try {
+            const messages = this.chatHistories[tabId] || [];
+            debugLog(`Rendering chat history for tab: ${tabId}, messages: ${messages.length}`);
+            this.elements.chatMessages.innerHTML = '';
+            
+            for (const { content, type } of messages) {
+                // Directly render message DOM, do not call addMessage
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}`;
+                const timestamp = new Date().toLocaleTimeString();
+                
+                // Don't process content that's already been processed (contains HTML)
+                let displayContent = content;
+                if (!content.includes('<span class=')) {
+                    displayContent = this.processMessageContent(content);
+                } else {
+                    debugLog('Skipping processing for already processed content in renderChatHistory');
+                }
+                
+                messageDiv.innerHTML = `
+                    <span class="timestamp">[${timestamp}]</span>
+                    <span class="content">${displayContent}</span>
+                `;
+                this.elements.chatMessages.appendChild(messageDiv);
+            }
+            this.scrollToBottom();
+            debugLog(`Finished rendering ${messages.length} messages for tab: ${tabId}`);
+        } catch (error) {
+            console.error('Error rendering chat history:', error);
         }
-        this.scrollToBottom();
     }
 
     createPrivateTab(tabId, number, username) {
-        // Remove if already exists (avoid duplicates)
-        const existing = this.elements.chatTabs.querySelector(`[data-tab="${tabId}"]`);
-        if (existing) return;
-        const tab = document.createElement('div');
-        tab.className = 'chat-tab';
-        tab.dataset.tab = tabId;
-        tab.innerHTML = `#${number} ${username} <span class="tab-download" title="Download chat history" style="display:inline-block;vertical-align:middle;cursor:pointer;">&#128190;</span><span class="tab-close" title="Close tab" style="margin-left:8px;cursor:pointer;font-size:1.1em;">&times;</span>`;
-        this.elements.chatTabs.appendChild(tab);
+        try {
+            // Remove if already exists (avoid duplicates)
+            const existing = this.elements.chatTabs.querySelector(`[data-tab="${tabId}"]`);
+            if (existing) {
+                debugLog(`Tab ${tabId} already exists, skipping creation`);
+                return;
+            }
+            
+            const tab = document.createElement('div');
+            tab.className = 'chat-tab';
+            tab.dataset.tab = tabId;
+            tab.innerHTML = `#${number} ${username} <span class="tab-download" title="Download chat history" style="display:inline-block;vertical-align:middle;cursor:pointer;">&#128190;</span><span class="tab-close" title="Close tab" style="margin-left:8px;cursor:pointer;font-size:1.1em;">&times;</span>`;
+            this.elements.chatTabs.appendChild(tab);
+            
+            debugLog(`Created private tab: ${tabId} for user #${number} ${username}`);
+        } catch (error) {
+            console.error('Error creating private tab:', error);
+        }
     }
 
     flashTab(tabId) {
@@ -974,24 +1301,31 @@ class NakenChatClient {
     }
 
     clearPrivateTabsAndHistories() {
+        debugLog('Clearing private tabs and histories');
+        
         // Remove all private tab DOM elements
         Array.from(this.elements.chatTabs.children).forEach(tab => {
             if (tab.dataset.tab && tab.dataset.tab.startsWith('pm_')) {
+                debugLog(`Removing private tab: ${tab.dataset.tab}`);
                 tab.remove();
             }
         });
+        
         // Remove all private chat histories and tab users
         for (const key of Object.keys(this.chatHistories)) {
             if (key.startsWith('pm_')) {
+                debugLog(`Removing chat history: ${key}`);
                 delete this.chatHistories[key];
             }
         }
         for (const key of Object.keys(this.tabUsers)) {
             if (key.startsWith('pm_')) {
+                debugLog(`Removing tab user: ${key}`);
                 delete this.tabUsers[key];
             }
         }
         this.saveChatHistories();
+        
         // Ensure Main Chat tab exists
         if (!this.elements.chatTabs.querySelector('[data-tab="main"]')) {
             const mainTab = document.createElement('div');
@@ -1000,8 +1334,17 @@ class NakenChatClient {
             mainTab.innerHTML = 'Main Chat <span class="tab-download" title="Download chat history" style="display:inline-block;vertical-align:middle;cursor:pointer;">&#128190;</span>';
             this.elements.chatTabs.appendChild(mainTab);
         }
-        // Always switch to main tab after clearing
-        this.switchTab('main');
+        
+        // Only switch to main tab if we're currently on a private tab
+        if (this.activeTab && this.activeTab.startsWith('pm_')) {
+            debugLog(`Switching from private tab ${this.activeTab} to main`);
+            this.switchTab('main');
+        }
+        if (this.lastPrivateSentTimeout) {
+            clearTimeout(this.lastPrivateSentTimeout);
+            this.lastPrivateSentTimeout = null;
+        }
+        this.lastPrivateSent = null;
     }
 }
 

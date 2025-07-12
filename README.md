@@ -17,6 +17,7 @@ A modern, full-featured web client for [Naken Chat](https://www.mikekohn.net/sof
 - **Cross-Server Compatibility**: Handles different server behaviors for private message confirmations
 - **Real-time Chat**: Live message updates with timestamps
 - **History Management**: All chat and private histories are cleared on connect/disconnect to avoid mismatches
+- **Toast Error Notifications**: If the client cannot connect to the server (e.g., invalid hostname or port), a toast popup will appear with a clear error message. The client will not show as connected if the connection fails.
 
 ## Prerequisites
 
@@ -122,10 +123,11 @@ Add new command handling in the `sendCommand` method in `script.js`.
 
 ## Troubleshooting
 
-### Connection Issues
-- Ensure the Naken Chat server is running on the correct port
-- Check firewall settings
-- Verify the proxy server is running on port 7666
+- If you enter an invalid server/hostname or port, you will see a red toast popup with an error message and the client will not show as connected.
+- Connection Issues
+  - Ensure the Naken Chat server is running on the correct port
+  - Check firewall settings
+  - Verify the proxy server is running on port 7666
 
 ### Browser Compatibility
 - Modern browsers with WebSocket support required

@@ -195,6 +195,8 @@ class TelnetProxy {
         telnetConn.on('error', (error) => {
             console.error(`Telnet error for ${clientId}:`, error);
             if (ws.readyState === WebSocket.OPEN) {
+                // Send JSON error message for client toast
+                ws.send(JSON.stringify({ type: 'error', message: 'Could not connect to target server. Please check the address and try again.' }));
                 ws.send(`Telnet connection error: ${error.message}\n`);
             }
             this.telnetConnections.delete(clientId);

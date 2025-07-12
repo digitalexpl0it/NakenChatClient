@@ -1,3 +1,8 @@
+// NakenChat Client configuration
+if (typeof window !== 'undefined') {
+  window.NAKENCHAT_DEBUG = false; // Set to true to enable debug logging in the browser
+}
+
 // Configuration file for Naken Chat Client
 module.exports = {
     // WebSocket server configuration
