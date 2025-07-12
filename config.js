@@ -8,9 +8,9 @@ module.exports = {
     // WebSocket server configuration
     wsPort: 7666,
     
-    // Telnet server configuration
-    telnetPort: 6666,
-    telnetHost: 'localhost',
+    // Naken Chat server configuration
+    nakenChatPort: 6666,
+    nakenChatHost: 'localhost',
     
     // Server settings
     serverName: 'Naken Chat Proxy',

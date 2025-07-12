@@ -2,14 +2,17 @@
 
 A modern, full-featured web client for [Naken Chat](https://www.mikekohn.net/software/nakenchat.php) servers, with a beautiful, responsive UI, multi-tab private messaging, chat history export, emoji and URL parsing, and a sidebar user list. Connects to Naken Chat servers via a local WebSocket proxy.
 
+![Alt text](Screenshots/mainwindow.png)
+
 ## Features
 
 - **Modern Full-Page UI**: Responsive, full-page layout with header, sidebar user list, vertical tabbed chats, and a polished dark theme
-- **Multi-Tab Private Messaging**: Each private chat opens in its own tab, with flashing for new messages and seamless switching
-- **Chat History Export**: Download chat history for any tab as a file; history is cached in localStorage per tab
+- **Overlay Connection Modal**: Configure server, port, and username in a modal dialog on load or disconnect
+- **Multi-Tab Private Messaging**: Each private chat opens in its own tab, with flashing for new messages and seamless switching (cannot private message yourself)
+- **Chat History Export**: Download chat history for any tab as a plain text file (HTML is stripped); history is cached in localStorage per tab
 - **WebSocket Proxy**: Bridges HTML5 client to Naken Chat servers
 - **Emoji & URL Parsing**: Text emojis (e.g., `:D`, `:P`, `:)`) are converted to real emojis; URLs are clickable and open in new tabs
-- **User List Sidebar**: Live, clickable user list with channel and permission info; usernames styled as pills
+- **User List Sidebar**: Live, clickable user list with channel and permission info; usernames styled as pills and numbers as badges
 - **Username Highlighting**: Your username is highlighted in all chats and user lists
 - **Command Support**: Full support for all Naken Chat server commands
 - **Robust Message Routing**: Private messages are routed to the correct tab, with compatibility for different server confirmation styles
@@ -42,7 +45,7 @@ A modern, full-featured web client for [Naken Chat](https://www.mikekohn.net/sof
    npm start
    ```
 3. Open your browser and navigate to `http://localhost:7666`
-4. In the web client UI, enter the **Server/Hostname** and **Port** of the Naken Chat server you want to connect to (e.g., `naken.cc` and `6666`)
+4. In the web client UI, click **Settings** (or wait for the overlay modal) and enter the **Server/Hostname**, **Port**, and **Username** you want to use (e.g., `naken.cc`, `6666`, `YourName`)
 5. Click **Connect**. The browser will connect to your local proxy, which will then connect to the specified Naken Chat server.
 
 ### How It Works
@@ -51,32 +54,35 @@ A modern, full-featured web client for [Naken Chat](https://www.mikekohn.net/sof
 - After connecting, the client tells the proxy which Naken Chat server and port to connect to.
 - The proxy then relays all messages between your browser and the remote Naken Chat server.
 - You can use the web client to connect to **any** Naken Chat server, as long as your proxy is running locally.
+- Proxy configuration keys are now `nakenChatHost` and `nakenChatPort` in `config.js`.
 
 ### Multi-Tab Private Messaging
 
-- Click a username in the user list to open a private chat tab.
+- Click a username (other than your own) in the user list to open a private chat tab.
 - Private messages (sent or received) appear in their own tabs.
 - Tabs flash for new messages until viewed.
 - When in a private tab, sending a message automatically uses the `.p <number>` command for the correct user—no need to type it manually.
 - Outgoing private messages create tabs even if the server only sends a short confirmation (e.g., `>> Message sent to [n]username.`).
 - The client tracks the last private message sent to display it in the correct tab.
+- **You cannot private message yourself.**
 
 ### Chat History Export & Management
 
 - Each tab (main or private) caches its history in localStorage.
-- Use the download button in any tab to export its chat history.
+- Use the download button in any tab to export its chat history as plain text (all HTML is stripped).
 - On connect/disconnect, all chat histories and private tabs are cleared to avoid mismatches due to changing user numbers.
 
 ### User List & Username Pills
 
 - The right sidebar shows all online users, their permissions, and channels.
 - Usernames are styled as pills; your own username is highlighted throughout the UI.
-- Clicking a username opens a private chat tab.
+- User numbers are shown as colored badges.
+- Clicking a username (other than your own) opens a private chat tab.
 
 ### UI Overview
 
-- **Header**: Connection controls (server, port, connect/disconnect)
-- **Left Sidebar**: Vertical tabs for main chat and private messages
+- **Header**: Connection status, settings, and disconnect controls
+- **Left Sidebar**: Vertical tabs for main chat and private messages (with close and download buttons)
 - **Main Area**: Chat bubbles with username pills, emoji, and clickable links
 - **Right Sidebar**: Live user list
 - **Bottom Input**: Message/command input with Enter key support
@@ -92,11 +98,12 @@ A modern, full-featured web client for [Naken Chat](https://www.mikekohn.net/sof
 
 ### Project Structure
 ```
-NakenClient/
+NakenChatClient/
 ├── index.html          # Main HTML file
 ├── styles.css          # Modern dark theme CSS
 ├── script.js           # Client-side JavaScript
 ├── proxy-server.js     # WebSocket-to-TCP proxy
+├── config.js           # Proxy configuration (nakenChatHost/nakenChatPort)
 ├── package.json        # Node.js dependencies
 └── README.md           # This file
 ```

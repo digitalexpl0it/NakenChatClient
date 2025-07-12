@@ -5,11 +5,11 @@ const fs = require('fs');
 const path = require('path');
 const config = require('./config');
 
-class TelnetProxy {
+class NakenChatProxy {
     constructor() {
         this.wss = null;
         this.clients = new Map();
-        this.telnetConnections = new Map();
+        this.nakenChatConnections = new Map();
         this.clientTargets = new Map(); // Store target host/port for each client
         this.config = config;
     }
@@ -17,7 +17,7 @@ class TelnetProxy {
     start() {
         console.log('Starting Naken Chat Proxy Server...');
         console.log(`WebSocket server listening on port ${this.config.wsPort}`);
-        console.log(`Proxying to telnet server at ${this.config.telnetHost}:${this.config.telnetPort}`);
+        console.log(`Proxying to Naken Chat server at ${this.config.nakenChatHost}:${this.config.nakenChatPort}`);
 
         // Create HTTP server to serve static files
         const server = http.createServer((req, res) => {
@@ -140,13 +140,13 @@ class TelnetProxy {
                 return;
             }
         } catch (e) {
-            // Not JSON, treat as regular telnet command
+            // Not JSON, treat as regular Naken Chat command
         }
 
-        // Get or create telnet connection
-        let telnetConn = this.telnetConnections.get(clientId);
+        // Get or create Naken Chat connection
+        let nakenChatConn = this.nakenChatConnections.get(clientId);
         
-        if (!telnetConn) {
+        if (!nakenChatConn) {
             const target = this.clientTargets.get(clientId);
             if (!target) {
                 console.error(`No target set for client ${clientId}`);
@@ -156,64 +156,64 @@ class TelnetProxy {
                 }
                 return;
             }
-            telnetConn = this.createTelnetConnection(clientId, target.host, target.port);
-            if (!telnetConn) return;
+            nakenChatConn = this.createNakenChatConnection(clientId, target.host, target.port);
+            if (!nakenChatConn) return;
         }
 
-        // Send message to telnet server
-        telnetConn.write(message + '\n');
+        // Send message to Naken Chat server
+        nakenChatConn.write(message + '\n');
     }
 
     // Update to accept host/port
-    createTelnetConnection(clientId, host, port) {
+    createNakenChatConnection(clientId, host, port) {
         const ws = this.clients.get(clientId);
         if (!ws) return null;
 
-        console.log(`Creating telnet connection for ${clientId} to ${host}:${port}`);
+        console.log(`Creating Naken Chat connection for ${clientId} to ${host}:${port}`);
 
-        const telnetConn = net.createConnection(port, host, () => {
-            console.log(`Telnet connected for ${clientId}`);
+        const nakenChatConn = net.createConnection(port, host, () => {
+            console.log(`Naken Chat connected for ${clientId}`);
             ws.send('Connected to server\n');
         });
 
-        telnetConn.on('data', (data) => {
+        nakenChatConn.on('data', (data) => {
             const message = data.toString();
-            console.log(`Telnet data for ${clientId}: ${message.trim()}`);
+            console.log(`Naken Chat data for ${clientId}: ${message.trim()}`);
             if (ws.readyState === WebSocket.OPEN) {
                 ws.send(message);
             }
         });
 
-        telnetConn.on('close', () => {
-            console.log(`Telnet connection closed for ${clientId}`);
-            this.telnetConnections.delete(clientId);
+        nakenChatConn.on('close', () => {
+            console.log(`Naken Chat connection closed for ${clientId}`);
+            this.nakenChatConnections.delete(clientId);
             if (ws.readyState === WebSocket.OPEN) {
-                ws.send('Telnet connection closed\n');
+                ws.send('Naken Chat connection closed\n');
             }
         });
 
-        telnetConn.on('error', (error) => {
-            console.error(`Telnet error for ${clientId}:`, error);
+        nakenChatConn.on('error', (error) => {
+            console.error(`Naken Chat error for ${clientId}:`, error);
             if (ws.readyState === WebSocket.OPEN) {
                 // Send JSON error message for client toast
                 ws.send(JSON.stringify({ type: 'error', message: 'Could not connect to target server. Please check the address and try again.' }));
-                ws.send(`Telnet connection error: ${error.message}\n`);
+                ws.send(`Naken Chat connection error: ${error.message}\n`);
             }
-            this.telnetConnections.delete(clientId);
+            this.nakenChatConnections.delete(clientId);
         });
 
-        this.telnetConnections.set(clientId, telnetConn);
-        return telnetConn;
+        this.nakenChatConnections.set(clientId, nakenChatConn);
+        return nakenChatConn;
     }
 
     handleWebSocketClose(clientId) {
         console.log(`WebSocket connection closed: ${clientId}`);
         
-        // Close telnet connection
-        const telnetConn = this.telnetConnections.get(clientId);
-        if (telnetConn) {
-            telnetConn.end();
-            this.telnetConnections.delete(clientId);
+        // Close Naken Chat connection
+        const nakenChatConn = this.nakenChatConnections.get(clientId);
+        if (nakenChatConn) {
+            nakenChatConn.end();
+            this.nakenChatConnections.delete(clientId);
         }
         
         // Clean up client data
@@ -235,8 +235,8 @@ class TelnetProxy {
             }
         });
         
-        // Close all telnet connections
-        this.telnetConnections.forEach((conn) => {
+        // Close all Naken Chat connections
+        this.nakenChatConnections.forEach((conn) => {
             conn.end();
         });
         
@@ -262,5 +262,5 @@ process.on('SIGTERM', () => {
 });
 
 // Start the proxy server
-const proxy = new TelnetProxy();
+const proxy = new NakenChatProxy();
 proxy.start(); 

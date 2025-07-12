@@ -29,6 +29,10 @@ class NakenChatClient {
         this.bindEvents();
         this.loadSettings();
         this.checkWelcomePreference();
+        // Show connection modal on page load if not connected
+        if (!this.isConnected) {
+            this.showConnectionModal();
+        }
         this.collectingHelp = false;
         this.helpBuffer = [];
         this.awaitingHelpBlankLine = false;
@@ -56,10 +60,15 @@ class NakenChatClient {
     
     initializeElements() {
         this.elements = {
-            serverInput: document.getElementById('serverInput'),
-            portInput: document.getElementById('portInput'),
-            usernameInput: document.getElementById('usernameInput'),
-            connectBtn: document.getElementById('connectBtn'),
+            // Modal elements
+            connectionModal: document.getElementById('connectionModal'),
+            modalServerInput: document.getElementById('modalServerInput'),
+            modalPortInput: document.getElementById('modalPortInput'),
+            modalUsernameInput: document.getElementById('modalUsernameInput'),
+            modalConnectBtn: document.getElementById('modalConnectBtn'),
+            modalCancelBtn: document.getElementById('modalCancelBtn'),
+            settingsBtn: document.getElementById('settingsBtn'),
+            // Connection elements
             disconnectBtn: document.getElementById('disconnectBtn'),
             messageInput: document.getElementById('messageInput'),
             sendBtn: document.getElementById('sendBtn'),
@@ -77,17 +86,26 @@ class NakenChatClient {
     }
     
     bindEvents() {
-        this.elements.connectBtn.addEventListener('click', () => this.connect());
+        // Modal events
+        this.elements.modalConnectBtn.addEventListener('click', () => this.connect());
+        this.elements.modalCancelBtn.addEventListener('click', () => this.hideConnectionModal());
+        this.elements.settingsBtn.addEventListener('click', () => this.showConnectionModal());
+        
+        // Connection events
         this.elements.disconnectBtn.addEventListener('click', () => this.disconnect());
         this.elements.sendBtn.addEventListener('click', () => this.sendMessage());
         this.elements.messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.sendMessage();
         });
+        
+        // Settings auto-save
+        this.elements.modalServerInput.addEventListener('input', () => this.saveSettings());
+        this.elements.modalPortInput.addEventListener('input', () => this.saveSettings());
+        this.elements.modalUsernameInput.addEventListener('input', () => this.saveSettings());
+        
         // Use .w for refresh (was .Z)
         this.elements.refreshUsersBtn.addEventListener('click', () => this.sendCommand('.w'));
-        this.elements.serverInput.addEventListener('input', () => this.saveSettings());
-        this.elements.portInput.addEventListener('input', () => this.saveSettings());
-        this.elements.usernameInput.addEventListener('input', () => this.saveSettings());
+        
         this.elements.chatTabs.addEventListener('click', (e) => {
             const downloadIcon = e.target.closest('.tab-download');
             if (downloadIcon) {
@@ -120,9 +138,9 @@ class NakenChatClient {
     loadSettings() {
         try {
             const settings = JSON.parse(localStorage.getItem('nakenChatSettings') || '{}');
-            this.elements.serverInput.value = settings.server || 'localhost';
-            this.elements.portInput.value = settings.port || 6666;
-            this.elements.usernameInput.value = settings.username || '';
+            this.elements.modalServerInput.value = settings.server || 'localhost';
+            this.elements.modalPortInput.value = settings.port || 6666;
+            this.elements.modalUsernameInput.value = settings.username || '';
         } catch (error) {
             console.error('Failed to load settings:', error);
         }
@@ -131,14 +149,83 @@ class NakenChatClient {
     saveSettings() {
         try {
             const settings = {
-                server: this.elements.serverInput.value,
-                port: this.elements.portInput.value,
-                username: this.elements.usernameInput.value
+                server: this.elements.modalServerInput.value,
+                port: this.elements.modalPortInput.value,
+                username: this.elements.modalUsernameInput.value
             };
             localStorage.setItem('nakenChatSettings', JSON.stringify(settings));
         } catch (error) {
             console.error('Failed to save settings:', error);
         }
+    }
+    
+    showConnectionModal() {
+        this.elements.connectionModal.classList.remove('hidden');
+        // Focus on username field if it's empty, otherwise focus on server field
+        if (!this.elements.modalUsernameInput.value.trim()) {
+            this.elements.modalUsernameInput.focus();
+        } else {
+            this.elements.modalServerInput.focus();
+        }
+        
+        // Add keyboard event listeners
+        this.addModalKeyboardListeners();
+        
+        // Add click outside to close
+        this.addModalClickOutsideListener();
+    }
+    
+    addModalKeyboardListeners() {
+        const handleKeydown = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this.connect();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                this.hideConnectionModal();
+            }
+        };
+        
+        // Add listeners to all modal inputs
+        this.elements.modalServerInput.addEventListener('keydown', handleKeydown);
+        this.elements.modalPortInput.addEventListener('keydown', handleKeydown);
+        this.elements.modalUsernameInput.addEventListener('keydown', handleKeydown);
+        
+        // Store the handler for cleanup
+        this.modalKeydownHandler = handleKeydown;
+    }
+    
+    removeModalKeyboardListeners() {
+        if (this.modalKeydownHandler) {
+            this.elements.modalServerInput.removeEventListener('keydown', this.modalKeydownHandler);
+            this.elements.modalPortInput.removeEventListener('keydown', this.modalKeydownHandler);
+            this.elements.modalUsernameInput.removeEventListener('keydown', this.modalKeydownHandler);
+            this.modalKeydownHandler = null;
+        }
+    }
+    
+    addModalClickOutsideListener() {
+        const handleClickOutside = (e) => {
+            if (e.target === this.elements.connectionModal) {
+                this.hideConnectionModal();
+            }
+        };
+        
+        this.elements.connectionModal.addEventListener('click', handleClickOutside);
+        this.modalClickOutsideHandler = handleClickOutside;
+    }
+    
+    removeModalClickOutsideListener() {
+        if (this.modalClickOutsideHandler) {
+            this.elements.connectionModal.removeEventListener('click', this.modalClickOutsideHandler);
+            this.modalClickOutsideHandler = null;
+        }
+    }
+    
+    hideConnectionModal() {
+        this.elements.connectionModal.classList.add('hidden');
+        this.removeModalKeyboardListeners();
+        this.removeModalClickOutsideListener();
     }
     
     showToast(message, type = 'error') {
@@ -155,9 +242,9 @@ class NakenChatClient {
     }
 
     async connect() {
-        const server = this.elements.serverInput.value.trim();
-        const port = parseInt(this.elements.portInput.value);
-        const username = this.elements.usernameInput.value.trim();
+        const server = this.elements.modalServerInput.value.trim();
+        const port = parseInt(this.elements.modalPortInput.value);
+        const username = this.elements.modalUsernameInput.value.trim();
         if (!server || !port || !username) {
             this.addMessage('Please fill in all connection details.', 'error');
             this.showToast('Please fill in all connection details.', 'error');
@@ -173,7 +260,7 @@ class NakenChatClient {
         this.username = username;
         try {
             this.updateConnectionStatus('Connecting...', 'connecting');
-            this.elements.connectBtn.disabled = true;
+            this.elements.modalConnectBtn.disabled = true;
             localStorage.removeItem('nakenChatHistories');
             this.chatHistories = { main: [] };
             this.tabUsers = {};
@@ -189,10 +276,11 @@ class NakenChatClient {
                 }));
                 this.isConnected = true;
                 this.updateConnectionStatus('Connected', 'connected');
-                this.elements.connectBtn.disabled = true;
+                this.elements.modalConnectBtn.disabled = true;
                 this.elements.disconnectBtn.disabled = false;
                 this.elements.messageInput.disabled = false;
                 this.elements.sendBtn.disabled = false;
+                this.hideConnectionModal();
                 this.addMessage(`Connected to ${server}:${port}`, 'success');
                 this.sendCommand(`.n ${username}`);
                 setTimeout(() => {
@@ -240,6 +328,8 @@ class NakenChatClient {
             this.socket.close();
         }
         this.handleDisconnect();
+        this.elements.modalConnectBtn.disabled = false;
+        this.showConnectionModal();
     }
     
     handleDisconnect() {
@@ -251,7 +341,7 @@ class NakenChatClient {
         this.updateUsersList();
         
         this.updateConnectionStatus('Disconnected', 'disconnected');
-        this.elements.connectBtn.disabled = false;
+        this.elements.modalConnectBtn.disabled = false;
         this.elements.disconnectBtn.disabled = true;
         this.elements.messageInput.disabled = true;
         this.elements.sendBtn.disabled = true;
@@ -884,15 +974,17 @@ class NakenChatClient {
             return content;
         }
         // If the message matches [number]username: message, only process the message part
-        const chatMsgMatch = content.match(/^(\[\d+\])(\S+):([\s\S]*)$/);
+        const chatMsgMatch = content.match(/^(\[(\d+)\])(\S+):([\s\S]*)$/);
         let prefix = '', msg = content;
         if (chatMsgMatch) {
-            // Determine if this is the current user
-            const username = chatMsgMatch[2];
+            // Extract number and username
+            const number = chatMsgMatch[2];
+            const username = chatMsgMatch[3];
             const isPrimary = username === this.username;
-            const pillClass = isPrimary ? 'username username-primary' : 'username';
-            prefix = `<span class="${pillClass}">[${chatMsgMatch[1]}]${username}</span>`;
-            msg = chatMsgMatch[3];
+            const numberBadgeClass = isPrimary ? 'user-number-badge user-number-badge-primary' : 'user-number-badge';
+            const namePillClass = isPrimary ? 'user-name-pill user-name-pill-primary' : 'user-name-pill';
+            prefix = `<span class=\"${numberBadgeClass}\">${number}</span><span class=\"${namePillClass}\">${username}</span>`;
+            msg = chatMsgMatch[4];
             // Ensure a space after the username pill
             if (!/^\s/.test(msg)) {
                 msg = ' ' + msg;
@@ -991,11 +1083,16 @@ class NakenChatClient {
             let statusClass = 'status-normal';
             if (userInfo.status.includes('E')) statusClass = 'status-echo';
             if (userInfo.status.includes('A')) statusClass = 'status-admin';
-            
+
+            // Determine if this is the current user
+            const isPrimary = userInfo.username === this.username;
+            const numberBadgeClass = isPrimary ? 'user-number-badge user-number-badge-primary' : 'user-number-badge';
+            const namePillClass = isPrimary ? 'user-name-pill user-name-pill-primary' : 'user-name-pill';
+
             userDiv.innerHTML = `
                 <div class="user-header">
-                    <span class="user-number">[${number}]</span>
-                    <span class="user-name">${userInfo.username}</span>
+                    <span class="${numberBadgeClass}">${number}</span>
+                    <span class="${namePillClass}">${userInfo.username}</span>
                     <span class="user-status ${statusClass}">${userInfo.status}</span>
                 </div>
                 <div class="user-details">
@@ -1005,10 +1102,17 @@ class NakenChatClient {
                 <div class="user-location">${userInfo.location}</div>
             `;
             
-            userDiv.addEventListener('click', () => {
-                this.elements.messageInput.value = `.p ${number} `;
-                this.elements.messageInput.focus();
-            });
+            // Prevent private messaging yourself
+            if (!isPrimary) {
+                userDiv.addEventListener('click', () => {
+                    this.elements.messageInput.value = `.p ${number} `;
+                    this.elements.messageInput.focus();
+                });
+            } else {
+                userDiv.title = "You cannot private message yourself.";
+                userDiv.style.opacity = 0.7;
+                userDiv.style.cursor = "not-allowed";
+            }
             
             usersList.appendChild(userDiv);
         }
@@ -1068,8 +1172,8 @@ class NakenChatClient {
         // Only show if not disabled by user
         if (localStorage.getItem('nakenHideWelcome') === '1') return;
 
-        // Remove any mention of 'telnet' from the message
-        let cleanMsg = message.replace(/telnet/gi, '');
+        // Remove any mention of 'Naken Chat' from the message
+        let cleanMsg = message.replace(/Naken Chat/gi, '');
 
         // Extract the banner up to the '>> You just logged on line ...' line
         const match = cleanMsg.match(/([\s\S]*?)(>> You just logged on line \d+ from:.*)/);
@@ -1231,7 +1335,15 @@ class NakenChatClient {
             const tab = document.createElement('div');
             tab.className = 'chat-tab';
             tab.dataset.tab = tabId;
-            tab.innerHTML = `#${number} ${username} <span class="tab-download" title="Download chat history" style="display:inline-block;vertical-align:middle;cursor:pointer;">&#128190;</span><span class="tab-close" title="Close tab" style="margin-left:8px;cursor:pointer;font-size:1.1em;">&times;</span>`;
+            // Truncate username if too long
+            const maxNameLen = 12;
+            let displayName = username;
+            if (username.length > maxNameLen) {
+                displayName = username.slice(0, maxNameLen - 1) + '…';
+            }
+            const tabTitle = `#${number} ${username}`;
+            tab.innerHTML = `<span class=\"tab-close\" title=\"Close tab\" style=\"margin-right:8px;cursor:pointer;font-size:1.2em;\">&times;</span><span class=\"chat-tab-label\">#${number} ${displayName}</span> <span class=\"tab-download\" title=\"Download chat history\" style=\"display:inline-block;vertical-align:middle;cursor:pointer;\">&#128190;</span>`;
+            tab.title = tabTitle;
             this.elements.chatTabs.appendChild(tab);
             
             debugLog(`Created private tab: ${tabId} for user #${number} ${username}`);
@@ -1270,8 +1382,14 @@ class NakenChatClient {
     downloadTabHistory(tabId) {
         const messages = this.chatHistories[tabId] || [];
         let text = '';
+        // Helper to strip HTML tags
+        function stripHtml(html) {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = html;
+            return tmp.textContent || tmp.innerText || '';
+        }
         for (const { content, type } of messages) {
-            text += `[${type}] ${content}\n`;
+            text += `[${type}] ${stripHtml(content)}\n`;
         }
         const blob = new Blob([text], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
