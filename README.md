@@ -19,6 +19,8 @@ A modern, full-featured web client for [Naken Chat](https://www.mikekohn.net/sof
 - **History Management**: All chat and private histories are cleared on connect/disconnect to avoid mismatches
 - **Toast Error Notifications**: If the client cannot connect to the server (e.g., invalid hostname or port), a toast popup will appear with a clear error message. The client will not show as connected if the connection fails.
 
+  ![Alt text](Screenshots/mainwindow.png)
+
 ## Prerequisites
 
 - Node.js (version 14 or higher)
