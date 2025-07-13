@@ -3,6 +3,19 @@ function debugLog(...args) {
     if (window.NAKENCHAT_DEBUG) console.log(...args);
 }
 
+// Merge customEmojis from config.js if available (browser-safe)
+let customEmojis = {};
+if (typeof window !== 'undefined' && window.config && window.config.customEmojis) {
+    customEmojis = window.config.customEmojis;
+} else if (typeof require === 'function') {
+    try {
+        const config = require('./config');
+        customEmojis = config.customEmojis || {};
+    } catch (e) {
+        // ignore if not available
+    }
+}
+
 class NakenChatClient {
     constructor() {
         this.socket = null;
@@ -14,7 +27,7 @@ class NakenChatClient {
         this.currentChannel = 'main';
         this.demoMode = false; // Set to true to simulate users for demo/testing only
         
-        this.emojiMap = {
+        this.emojiMap = Object.assign({
             ':D': '😀', ':P': '😛', ':)': '🙂', ':(': '😞', ';)': '😉',
             ':O': '😮', ':o': '😮', ':|': '😐', ':/': '😕', ':\\': '😕',
             '8)': '😎', '8-)': '😎', 'B)': '😎', 'B-)': '😎',
@@ -23,7 +36,7 @@ class NakenChatClient {
             ':lol:': '😂', ':rofl:': '🤣', ':cool:': '😎',
             ':thumbsup:': '👍', ':thumbsdown:': '👎',
             ':wave:': '👋', ':clap:': '👏', ':pray:': '🙏'
-        };
+        }, customEmojis);
         
         this.initializeElements();
         this.bindEvents();

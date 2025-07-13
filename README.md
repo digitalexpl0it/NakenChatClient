@@ -111,16 +111,21 @@ NakenChatClient/
 ### Customization
 
 #### Adding New Emojis
-Edit the `emojiMap` object in `script.js`:
+To add or customize emojis, edit the `customEmojis` object in `config.js`:
 
-```javascript
-this.emojiMap = {
-    ':D': '😀',
-    ':P': '😛',
+```js
+// In config.js
+module.exports = {
+  // ...
+  customEmojis: {
     // Add your custom emojis here
-    ':custom:': '🎉'
+    ':custom:': '🎉',
+    ':party:': '🥳'
+  }
 };
 ```
+
+Your custom emojis will be merged with the built-in emoji set and available in chat.
 
 #### Changing the Theme
 Modify `styles.css` to customize colors, fonts, and layout.
