@@ -567,7 +567,7 @@ class NakenChatClient {
         }
         
         // Pattern 1: Outgoing private message with full echo
-        // >> Message sent to [1]bob: <0>Derrick (private): hi
+        // >> Message sent to [1]bob: <0>DigitalExpl0it (private): hi
         const privOutMatch = cleanMsg.match(/^>> Message sent to \[(\d+)\](.*?): <\d+>(.+?) \(private\): (.+)$/);
         
         // Pattern 2: Incoming private message
@@ -1173,7 +1173,7 @@ class NakenChatClient {
 
     simulateUserList() {
         // Simulate a .w output for testing/demo
-        const fakeWOutput = `Name                       Channel        Idle Location\n[0]Derrick            ----E Main             1m localhost\n[1]mike               ----- Main             3s Mac.mikekohn.net\n[2]indrek             ----E Main            50m gateway.mare.ee\n[3]joe                ----E Main             9h ppp-70-129-57-233.ds\n--------------------------------------------------------\nTotal: 4`;
+        const fakeWOutput = `Name                       Channel        Idle Location\n[0]DigitalExpl0it            ----E Main             1m localhost\n[1]mike               ----- Main             3s Mac.mikekohn.net\n[2]indrek             ----E Main            50m gateway.mare.ee\n[3]joe                ----E Main             9h ppp-70-129-57-233.ds\n--------------------------------------------------------\nTotal: 4`;
         this.handleUsersList(fakeWOutput);
     }
 
