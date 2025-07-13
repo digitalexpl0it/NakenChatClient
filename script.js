@@ -1116,6 +1116,11 @@ class NakenChatClient {
             
             usersList.appendChild(userDiv);
         }
+        // Update user count in sidebar header
+        const userCountSpan = document.getElementById('userCount');
+        if (userCountSpan) {
+            userCountSpan.textContent = this.users.size;
+        }
     }
     
     refreshUsers() {

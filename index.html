@@ -56,15 +56,32 @@
                 <!-- Private chat tabs will be added here -->
             </div>
             <div class="chat-container">
-                <div class="chat-messages" id="chatMessages">
-                    <div class="welcome-message">
-                        Welcome to Naken Chat Client! Click "Settings" to configure your connection.
+                <div class="main-chat-column">
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="welcome-message">
+                            Welcome to Naken Chat Client! Click "Settings" to configure your connection.
+                        </div>
+                    </div>
+                    <div class="chat-input-container">
+                        <div class="input-wrapper">
+                            <input type="text" id="messageInput" placeholder="Type your message or command..." disabled>
+                            <button id="sendBtn" class="btn btn-primary" disabled>Send</button>
+                        </div>
+                        <div class="command-help">
+                            <span class="help-text">Commands start with . (e.g., .help, .n username)</span>
+                        </div>
                     </div>
                 </div>
                 <div class="sidebar" id="sidebar">
                     <div class="sidebar-header">
-                        <h3>Users Online</h3>
-                        <button id="refreshUsersBtn" class="btn btn-small">Refresh</button>
+                        <span class="sidebar-title">Users Online (<span id="userCount"></span>)</span>
+                        <button id="refreshUsersBtn" class="btn btn-icon" title="Refresh user list" aria-label="Refresh user list">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#b0c4de" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 2v6h-6"/>
+                                <path d="M3 12a9 9 0 0 1 15-7.7L21 8"/>
+                                <path d="M3 12a9 9 0 0 0 15 7.7L21 16"/>
+                            </svg>
+                        </button>
                     </div>
                     <div class="users-list" id="usersList">
                         <div class="no-users">No users online</div>
@@ -72,19 +89,8 @@
                 </div>
             </div>
         </div>
-
-        <div class="chat-input-container">
-            <div class="input-wrapper">
-                <input type="text" id="messageInput" placeholder="Type your message or command..." disabled>
-                <button id="sendBtn" class="btn btn-primary" disabled>Send</button>
-            </div>
-            <div class="command-help">
-                <span class="help-text">Commands start with . (e.g., .help, .n username)</span>
-            </div>
-        </div>
+        <script src="script.js"></script>
+        <div id="toastContainer" class="toast-container"></div>
     </div>
-
-    <script src="script.js"></script>
-    <div id="toastContainer" class="toast-container"></div>
 </body>
 </html> 
